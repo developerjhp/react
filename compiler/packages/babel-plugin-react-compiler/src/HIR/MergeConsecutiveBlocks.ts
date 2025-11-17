@@ -61,7 +61,13 @@ export function mergeConsecutiveBlocks(fn: HIRFunction): void {
     CompilerError.invariant(predecessor !== undefined, {
       reason: `Expected predecessor ${predecessorId} to exist`,
       description: null,
-      loc: null,
+      details: [
+        {
+          kind: 'error',
+          loc: null,
+          message: null,
+        },
+      ],
       suggestions: null,
     });
     if (predecessor.terminal.kind !== 'goto' || predecessor.kind !== 'block') {
@@ -77,7 +83,13 @@ export function mergeConsecutiveBlocks(fn: HIRFunction): void {
       CompilerError.invariant(phi.operands.size === 1, {
         reason: `Found a block with a single predecessor but where a phi has multiple (${phi.operands.size}) operands`,
         description: null,
-        loc: null,
+        details: [
+          {
+            kind: 'error',
+            loc: null,
+            message: null,
+          },
+        ],
         suggestions: null,
       });
       const operand = Array.from(phi.operands.values())[0]!;
@@ -106,6 +118,17 @@ export function mergeConsecutiveBlocks(fn: HIRFunction): void {
     predecessor.terminal = block.terminal;
     merged.merge(block.id, predecessorId);
     fn.body.blocks.delete(block.id);
+  }
+  for (const [, block] of fn.body.blocks) {
+    for (const phi of block.phis) {
+      for (const [predecessorId, operand] of phi.operands) {
+        const mapped = merged.get(predecessorId);
+        if (mapped !== predecessorId) {
+          phi.operands.delete(predecessorId);
+          phi.operands.set(mapped, operand);
+        }
+      }
+    }
   }
   markPredecessors(fn.body);
   for (const [, {terminal}] of fn.body.blocks) {

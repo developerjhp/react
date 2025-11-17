@@ -25,6 +25,7 @@ import {
   createPrerenderRequest,
   startWork,
   startFlowing,
+  startFlowingDebug,
   stopFlowing,
   abort,
   resolveDebugMessage,
@@ -59,14 +60,13 @@ export {createTemporaryReferenceSet} from 'react-server/src/ReactFlightServerTem
 export type {TemporaryReferenceSet};
 
 type Options = {
-  debugChannel?: {readable?: ReadableStream, ...},
+  debugChannel?: {readable?: ReadableStream, writable?: WritableStream, ...},
   environmentName?: string | (() => string),
   filterStackFrame?: (url: string, functionName: string) => boolean,
   identifierPrefix?: string,
   signal?: AbortSignal,
   temporaryReferences?: TemporaryReferenceSet,
   onError?: (error: mixed) => void,
-  onPostpone?: (reason: string) => void,
 };
 
 function startReadingFromDebugChannelReadableStream(
@@ -118,12 +118,15 @@ export function renderToReadableStream(
     __DEV__ && options && options.debugChannel
       ? options.debugChannel.readable
       : undefined;
+  const debugChannelWritable =
+    __DEV__ && options && options.debugChannel
+      ? options.debugChannel.writable
+      : undefined;
   const request = createRequest(
     model,
     null,
     options ? options.onError : undefined,
     options ? options.identifierPrefix : undefined,
-    options ? options.onPostpone : undefined,
     options ? options.temporaryReferences : undefined,
     __DEV__ && options ? options.environmentName : undefined,
     __DEV__ && options ? options.filterStackFrame : undefined,
@@ -140,6 +143,19 @@ export function renderToReadableStream(
       };
       signal.addEventListener('abort', listener);
     }
+  }
+  if (debugChannelWritable !== undefined) {
+    const debugStream = new ReadableStream(
+      {
+        type: 'bytes',
+        pull: (controller): ?Promise<void> => {
+          startFlowingDebug(request, controller);
+        },
+      },
+      // $FlowFixMe[prop-missing] size() methods are not allowed on byte streams.
+      {highWaterMark: 0},
+    );
+    debugStream.pipeTo(debugChannelWritable);
   }
   if (debugChannelReadable !== undefined) {
     startReadingFromDebugChannelReadableStream(request, debugChannelReadable);
@@ -198,7 +214,6 @@ export function prerender(
       onFatalError,
       options ? options.onError : undefined,
       options ? options.identifierPrefix : undefined,
-      options ? options.onPostpone : undefined,
       options ? options.temporaryReferences : undefined,
       __DEV__ && options ? options.environmentName : undefined,
       __DEV__ && options ? options.filterStackFrame : undefined,
@@ -222,7 +237,7 @@ export function prerender(
   });
 }
 
-let serverManifest = {};
+let serverManifest: ServerManifest = {};
 export function registerServerActions(manifest: ServerManifest) {
   // This function is called by the bundler to register the manifest.
   serverManifest = manifest;
